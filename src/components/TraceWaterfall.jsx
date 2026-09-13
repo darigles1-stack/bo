@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { GitBranch, Search, ArrowRight, Clock, Server, CheckCircle2, AlertTriangle, Eye } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Search, Clock, Eye } from 'lucide-react';
 
-export default function TraceWaterfall({ initialTraceId, onViewPayload }) {
+export default function TraceWaterfall({ initialTraceId, onViewPayload, embedded = false }) {
   const [traceId, setTraceId] = useState(initialTraceId || '');
   const [steps, setSteps] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -20,19 +20,13 @@ export default function TraceWaterfall({ initialTraceId, onViewPayload }) {
     setLoading(true);
     setError(null);
     try {
-      // Intenta vía API backend local primero, si falla va por ms-audit proxy
       let res = await fetch(`/api/mongo/operations/${id}`);
-      if (!res.ok) {
-        res = await fetch(`/api/mongo/trace/${id}`);
-      }
-      if (!res.ok) {
-        res = await fetch(`/api/audit/trace/${id}`);
-      }
-      if (!res.ok) {
-        throw new Error(`Error ${res.status}: No se encontró la traza en MongoDB`);
-      }
+      if (!res.ok) res = await fetch(`/api/mongo/trace/${id}`);
+      if (!res.ok) res = await fetch(`/api/audit/trace/${id}`);
+      if (!res.ok) throw new Error(`No se encontró la traza (${res.status})`);
+
       const data = await res.json();
-      const list = Array.isArray(data) ? data : (data.pasos || data.steps || []);
+      const list = Array.isArray(data) ? data : data.pasos || data.steps || [];
       setSteps(list);
     } catch (err) {
       setError(err.message);
@@ -42,177 +36,119 @@ export default function TraceWaterfall({ initialTraceId, onViewPayload }) {
     }
   };
 
-  // Calcular tiempo total acumulado para proporciones de waterfall
-  const totalDuration = steps.reduce((acc, step) => acc + (step.durationMs || 10), 0) || 1;
+  const totalDuration =
+    steps.reduce((acc, step) => acc + (typeof step.durationMs === 'number' ? step.durationMs : 10), 0) || 1;
 
   return (
-    <div className="card">
-      <div className="card-header">
-        <div className="card-title">
-          <GitBranch color="#00d2ff" size={20} />
-          Árbol Jerárquico Padre-Hijo (Trace Waterfall)
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem', width: '100%', maxWidth: '500px' }}>
-          <input
-            type="text"
-            className="input-field"
-            placeholder="Pegar o escribir Trace ID..."
-            value={traceId}
-            onChange={(e) => setTraceId(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && fetchTrace()}
-          />
-          <button className="btn btn-primary" onClick={() => fetchTrace()} disabled={loading}>
-            <Search size={14} /> Buscar
-          </button>
-        </div>
-      </div>
-
-      {loading && (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }} className="pulse">
-          Reconstruyendo cascada distribuida desde MongoDB...
+    <div className={embedded ? '' : 'card'}>
+      {!embedded && (
+        <div className="card-header">
+          <div className="card-title">Detalle de traza</div>
         </div>
       )}
 
+      <div style={{ display: 'flex', gap: '0.55rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          className="input"
+          style={{ flex: 1, minWidth: 200 }}
+          placeholder="Trace ID"
+          value={traceId}
+          onChange={(e) => setTraceId(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && fetchTrace()}
+        />
+        <button type="button" className="btn btn-primary" onClick={() => fetchTrace()} disabled={loading}>
+          <Search size={14} /> Buscar
+        </button>
+      </div>
+
+      {loading && <div className="state-box pulse">Reconstruyendo secuencia…</div>}
+
       {error && (
         <div style={{
-          padding: '1rem',
+          padding: '0.85rem 1rem',
           background: 'rgba(239, 68, 68, 0.1)',
-          border: '1px solid rgba(239, 68, 68, 0.3)',
-          color: '#fca5a5',
+          border: '1px solid rgba(239, 68, 68, 0.28)',
+          color: '#fecaca',
           borderRadius: 'var(--radius-sm)',
-          marginBottom: '1rem'
+          marginBottom: '1rem',
+          fontSize: '0.86rem',
         }}>
           {error}
         </div>
       )}
 
       {!loading && !error && steps.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-          Ingresá un Trace ID arriba o hacé clic en el botón <strong>"Traza"</strong> desde la tabla de auditoría para ver la secuencia Padre-Hijo.
-        </div>
+        <div className="state-box">Seleccioná una operación del listado o ingresá un Trace ID.</div>
       )}
 
       {!loading && steps.length > 0 && (
-        <div>
-          {/* Trace Summary Banner */}
-          <div style={{
-            background: 'var(--bg-surface-elevated)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '0.85rem 1.25rem',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '1.25rem',
-            flexWrap: 'wrap',
-            gap: '0.75rem'
-          }}>
+        <>
+          <div className="meta-grid">
             <div>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Trace ID Seleccionado:</span>
-              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#38bdf8' }}>{traceId}</div>
+              <span>Trace ID</span><br />
+              <strong className="mono" style={{ color: '#93c5fd' }}>{traceId}</strong>
             </div>
-            <div style={{ display: 'flex', gap: '1.5rem' }}>
-              <div>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Pasos Registrados:</span>
-                <div style={{ fontWeight: 700, color: '#fff' }}>{steps.length} eventos</div>
-              </div>
-              <div>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Duración Estimada Total:</span>
-                <div style={{ fontWeight: 700, color: '#10b981' }}>{totalDuration} ms</div>
-              </div>
+            <div>
+              <span>Pasos</span><br />
+              <strong>{steps.length}</strong>
+            </div>
+            <div>
+              <span>Duración acumulada</span><br />
+              <strong style={{ color: '#86efac' }}>{totalDuration} ms</strong>
             </div>
           </div>
 
-          {/* Waterfall Steps */}
-          <div className="waterfall-container">
+          <div className="timeline">
             {steps.map((step, index) => {
-              const isParent = step.stepOrder === 0;
+              const isParent = step.stepOrder === 0 || step.parentSpanId == null;
               const stepPercent = Math.max(Math.round(((step.durationMs || 10) / totalDuration) * 100), 8);
-              const isError = step.statusCode >= 400 || step.statusCategory === '4XX' || step.statusCategory === '5XX';
+              const isError = (step.statusCode || 0) >= 400;
 
               return (
                 <div
-                  key={step.id || step._id || index}
-                  className="waterfall-step"
-                  style={{
-                    marginLeft: isParent ? '0' : `${Math.min(step.stepOrder * 24, 96)}px`,
-                    borderLeft: isParent ? '3px solid #00d2ff' : '3px solid #8b5cf6'
-                  }}
+                  key={step.id || step._id || step.spanId || index}
+                  className={`step-card ${isParent ? '' : 'child'} ${isError ? 'error' : ''}`}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                      <span className="badge" style={{
-                        background: isParent ? 'rgba(0, 210, 255, 0.2)' : 'rgba(139, 92, 246, 0.2)',
-                        color: isParent ? '#00d2ff' : '#c4b5fd',
-                        fontWeight: 700
-                      }}>
-                        {isParent ? 'PADRE (Step 0)' : `HIJO (Step ${step.stepOrder})`}
+                  <div className="step-top">
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
+                      <span className={`badge ${isParent ? 'badge-service' : 'badge-channel'}`}>
+                        {isParent ? 'Servicio principal' : `Paso ${step.stepOrder ?? index}`}
                       </span>
-                      <span className="badge badge-service">
-                        {step.nombre || step.serviceName || 'ms'}
-                      </span>
-                      <strong style={{ color: '#fff', fontSize: '0.9rem' }}>
-                        {step.descripcion || step.eventType || (isParent ? 'INBOUND_REQUEST' : 'OUTBOUND_CALL')}
+                      <span className="badge badge-muted">{step.nombre || step.serviceName || 'servicio'}</span>
+                      <strong style={{ fontSize: '0.9rem' }}>
+                        {step.descripcion || step.eventType || (isParent ? 'Solicitud entrante' : 'Llamado externo')}
                       </strong>
                     </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                      <span className={`badge ${isError ? 'badge-5xx' : 'badge-2xx'}`}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                      <span className={`badge ${isError ? 'badge-danger' : 'badge-success'}`}>
                         {step.statusCode || 200}
                       </span>
-                      <span className="mono-text" style={{ fontSize: '0.8rem', color: '#38bdf8' }}>
-                        <Clock size={12} style={{ display: 'inline', marginRight: '3px' }} />
-                        {step.durationMs || 0} ms
+                      <span className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Clock size={12} /> {step.durationMs || 0} ms
                       </span>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => onViewPayload(step)}
-                        title="Inspeccionar RQ/RS de este paso"
-                      >
-                        <Eye size={12} /> RQ/RS
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => onViewPayload?.(step)}>
+                        <Eye size={12} /> Request / Response
                       </button>
                     </div>
                   </div>
 
-                  {/* Operation details */}
-                  <div style={{ marginTop: '0.4rem', fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                    <div>
-                      <span style={{ color: 'var(--text-muted)' }}>Operación / URI:</span>{' '}
-                      <code style={{ color: '#e5e7eb' }}>{step.httpMethod} {step.endpoint}</code>
-                    </div>
-                    {step.spanId && (
-                      <div>
-                        <span style={{ color: 'var(--text-muted)' }}>Span ID:</span>{' '}
-                        <span className="mono-text">{step.spanId}</span>
-                      </div>
-                    )}
-                    {step.parentSpanId && (
-                      <div>
-                        <span style={{ color: 'var(--text-muted)' }}>Parent Span:</span>{' '}
-                        <span className="mono-text">{step.parentSpanId}</span>
-                      </div>
-                    )}
+                  <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Endpoint: </span>
+                    <code style={{ color: '#e2e8f0' }}>{step.httpMethod} {step.endpoint}</code>
                   </div>
 
-                  {/* Waterfall Bar */}
-                  <div className="waterfall-bar-track">
+                  <div className="bar-track">
                     <div
-                      className="waterfall-bar-fill"
-                      style={{
-                        width: `${stepPercent}%`,
-                        background: isError
-                          ? 'linear-gradient(90deg, #ef4444, #b91c1c)'
-                          : isParent
-                          ? 'linear-gradient(90deg, #00d2ff, #0072ff)'
-                          : 'linear-gradient(90deg, #8b5cf6, #6366f1)'
-                      }}
+                      className={`bar-fill ${isError ? 'err' : isParent ? '' : 'child'}`}
+                      style={{ width: `${stepPercent}%` }}
                     />
                   </div>
                 </div>
               );
             })}
           </div>
-        </div>
+        </>
       )}
     </div>
   );
